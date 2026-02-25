@@ -6,95 +6,117 @@ import random
 import string
 import json
 
-# ================= 配置区 =================
-# 读取并自动清理前后的换行符和空格
+# ================= 配置区域 =================
+# 读取并清理环境变量
 COOKIE = os.environ.get("GS_COOKIE", "").strip()
-PUSH_KEY = os.environ.get("SEND_KEY", "").strip() # 这里对应你 GitHub Secrets 里的名字
+PUSH_KEY = os.environ.get("SEND_KEY", "").strip() 
 
-# 签到所需的固定参数
-ACT_ID = "e202009291139501"
-APP_VERSION = "2.34.1"
-# 社区签到特定的 Salt (LK2)
-SALT = "6s9q3p0t977un3pp827he9bvbtq968ps" 
+# 核心常量 (请确保 ACT_ID 和 SALT 是最新的)
+ACT_ID = "e202311201442471"  
+APP_VERSION = "2.68.1"
+SALT = "k8v1tj7p176403t835560ndnx32230v7" 
+# ===========================================
 
-def get_ds(query: str = "", body: dict = None) -> str:
-    """
-    生成 DS 2.0 校验码
-    计算逻辑：DS = md5(salt=n, t=time, r=random, b=body_json, q=query_string)
-    """
+def get_ds():
+    """生成米游社所需的动态签名 (DS)"""
     t = int(time.time())
     r = ''.join(random.sample(string.ascii_letters + string.digits, 6))
+    # 这里的算法需要根据实际接口调整，若持续 -10001 请参考之前的 DS 2.0 逻辑
+    text = f"salt={SALT}&t={t}&r={r}"
+    md5_hash = hashlib.md5(text.encode(encoding='utf-8')).hexdigest()
+    return f"{t},{r},{md5_hash}"
+
+def get_headers(use_ds=True):
+    """构造请求头"""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) miHoYoBBS/2.68.1",
+        "Referer": f"https://webstatic.mihoyo.com/bbs/event/signin-ys/index.html?act_id={ACT_ID}",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cookie": COOKIE,
+        "x-rpc-device_id": "".join(random.sample(string.ascii_letters + string.digits, 32)).upper(),
+        "x-rpc-client_type": "5", 
+        "x-rpc-app_version": APP_VERSION,
+    }
+    if use_ds:
+        # 移除可能存在的换行符，防止 Header 报错
+        headers["DS"] = get_ds().replace("\n", "").strip()
+    return headers
+
+def get_roles():
+    """获取绑定的原神角色信息"""
+    url = f"https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie?game_biz=hk4e_cn"
+    try:
+        response = requests.get(url, headers=get_headers(use_ds=False), timeout=10)
+        data = response.json()
+        if data["retcode"] != 0:
+            return None, f"获取角色失败: {data['message']}"
+        return data["data"]["list"], "Success"
+    except Exception as e:
+        return None, f"请求异常: {str(e)}"
+
+def do_sign(role):
+    """执行签到操作并返回结果字符串"""
+    url = "https://api-takumi.mihoyo.com/event/luna/sign"
+    payload = {
+        "act_id": ACT_ID,
+        "region": role["region"],
+        "uid": role["game_uid"]
+    }
+    role_name = f"{role['nickname']}({role['game_uid']})"
     
-    # 核心：将 body 转化为紧凑的 JSON 字符串参与哈希，严禁包含多余空格
-    b = json.dumps(body) if body else ""
-    q = query
-    
-    main_str = f"salt={SALT}&t={t}&r={r}&b={b}&q={q}"
-    c = hashlib.md5(main_str.encode(encoding='utf-8')).hexdigest()
-    
-    return f"{t},{r},{c}"
+    try:
+        response = requests.post(url, headers=get_headers(), json=payload, timeout=10)
+        data = response.json()
+        
+        if data["retcode"] == 0:
+            return f"✅ {role_name}: 签到成功"
+        elif data["retcode"] == -5003:
+            return f"✨ {role_name}: 今日已签到"
+        else:
+            return f"⚠️ {role_name}: 失败({data['message']})"
+    except Exception as e:
+        return f"❌ {role_name}: 请求异常({str(e)})"
 
 def push_wechat(title, content):
     """通过 Server 酱 (SEND_KEY) 推送结果"""
     if not PUSH_KEY:
-        print("⚠️ 未配置 SEND_KEY，跳过推送")
+        print("⚠️ 未配置 SEND_KEY，跳过微信推送")
         return
-    # 兼容旧版和 Turbo 版接口
     url = f"https://sctapi.ftqq.com/{PUSH_KEY}.send"
     data = {"title": title, "desp": content}
     try:
         res = requests.post(url, data=data, timeout=10)
-        print(f"微信推送状态: {res.status_code}")
+        print(f"微信推送结果状态码: {res.status_code}")
     except Exception as e:
-        print(f"推送异常: {e}")
-
-def sign_in():
-    """执行签到逻辑"""
-    if not COOKIE:
-        return "❌ 运行失败：未在 Secrets 中配置 GS_COOKIE"
-    
-    url = "https://api-takumi.mihoyo.com/event/bbs_sign_reward/sign"
-    payload = {"act_id": ACT_ID}
-    
-    # 模拟真实 App 的请求头
-    # 使用 .strip() 确保 COOKIE 和 DS 中没有 \n
-    headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) miHoYoBBS/2.34.1",
-        "Referer": f"https://webstatic.mihoyo.com/bbs/event/signin-ys/index.html?bbs_auth_required=true&act_id={ACT_ID}",
-        "Accept": "application/json, text/plain, */*",
-        "Content-Type": "application/json;charset=utf-8",
-        "Host": "api-takumi.mihoyo.com",
-        "x-rpc-app_version": APP_VERSION,
-        "x-rpc-client_type": "5", 
-        "x-rpc-device_id": "".join(random.sample(string.ascii_letters + string.digits, 32)).upper(),
-        "DS": get_ds(body=payload).strip(), 
-        "Cookie": COOKIE
-    }
-
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
-        res_data = response.json()
+        print(f"微信推送异常: {e}")
         
-        retcode = res_data.get("retcode")
-        message = res_data.get("message")
+def main():
+    print("🚀 开始执行原神自动签到...")
+    results = [] # 用于收集所有签到结果
+    
+    # 1. 获取角色
+    roles, status_msg = get_roles()
+    if not roles:
+        err_msg = f"终止运行：{status_msg}"
+        print(err_msg)
+        push_wechat("原神签到异常中断", err_msg)
+        return
+    
+    print(f"🔍 找到 {len(roles)} 个角色，准备依次签到...")
+    
+    # 2. 遍历角色签到
+    for role in roles:
+        res = do_sign(role)
+        print(res)
+        results.append(res)
+        # 随机等待，模拟人类行为
+        if len(roles) > 1:
+            time.sleep(random.randint(2, 5))
         
-        if retcode == 0:
-            return "✅ 原神签到成功！奖励已发放到邮箱。"
-        elif retcode == -5003:
-            return f"💡 您今天已经签到过了：{message}"
-        elif retcode == -100:
-            return "❌ Cookie 已失效，请重新获取并更新 Secrets"
-        else:
-            return f"❌ 签到失败\n状态码: {retcode}\n信息: {message}"
-            
-    except Exception as e:
-        # 如果依然报错，打印出具体的错误类型方便排查
-        return f"🚀 脚本执行异常: {str(e)}"
+    # 3. 汇总并推送最终结果
+    final_report = "\n".join(results)
+    print("🏁 所有任务执行完毕，正在推送结果...")
+    push_wechat("原神自动签到汇总报告", f"本次运行结果如下：\n\n{final_report}")
 
 if __name__ == "__main__":
-    print("--- 正在启动米游社自动签到 ---")
-    result_msg = sign_in()
-    print(result_msg)
-    
-    # 执行推送逻辑
-    push_wechat("米游社签到提醒", result_msg)
+    main()
