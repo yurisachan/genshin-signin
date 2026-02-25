@@ -28,12 +28,12 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      # - name: Run Genshin Sign-in (原神网页签到)
-      #   # 【优化3】非常重要：加上这行。即使这个脚本因为网络或风控报错崩溃了，也会继续执行下一个脚本，不会直接整个终止。
-      #   continue-on-error: true 
-      #   run: python main.py
+      - name: Run Genshin Sign-in (原神网页签到)
+        # 【优化3】非常重要：加上这行。即使这个脚本因为网络或风控报错崩溃了，也会继续执行下一个脚本，不会直接整个终止。
+        continue-on-error: true 
+        run: python main.py
 
-      - name: Run BBS Tasks (米游社社区日常)
-        continue-on-error: true
-        # 确保你的仓库根目录下有 bbs.py 文件
-        run: python bbs.py
+      # - name: Run BBS Tasks (米游社社区日常)
+      #   continue-on-error: true
+      #   # 确保你的仓库根目录下有 bbs.py 文件
+      #   run: python bbs.py
