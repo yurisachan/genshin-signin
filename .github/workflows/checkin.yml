@@ -1,13 +1,21 @@
-name: Genshin Impact Signin
+name: Genshin Impact & BBS Signin
 
 on:
   schedule:
-    - cron: '0 1 * * *'  # 每天北京时间上午 9:00 (UTC 1:00) 运行
+    # 【优化1】尽量不要整点运行 (0 1 ***)。GitHub Actions 整点任务极度拥挤，可能会延迟半小时才执行。
+    # 建议改到非整点，比如每天北京时间上午 9:15 (UTC 1:15) 运行
+    - cron: '15 1 * * *'  
   workflow_dispatch:      # 允许手动触发，方便测试
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    
+    # 【优化2】将环境变量提取到全局，这样下面不管跑多少个脚本都不用重复写 env 了
+    env:
+      GS_COOKIE: ${{ secrets.GS_COOKIE }}
+      SEND_KEY: ${{ secrets.SEND_KEY }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -20,8 +28,12 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run Sign-in Script
-        env:
-          GS_COOKIE: ${{ secrets.GS_COOKIE }}  # 左边对应Python，右边对应网页Secret
-          SEND_KEY: ${{ secrets.SEND_KEY }}    # 左边对应Python，右边对应网页Secret
-        run: python main.py
+      # - name: Run Genshin Sign-in (原神网页签到)
+      #   # 【优化3】非常重要：加上这行。即使这个脚本因为网络或风控报错崩溃了，也会继续执行下一个脚本，不会直接整个终止。
+      #   continue-on-error: true 
+      #   run: python main.py
+
+      - name: Run BBS Tasks (米游社社区日常)
+        continue-on-error: true
+        # 确保你的仓库根目录下有 bbs.py 文件
+        run: python bbs.py
