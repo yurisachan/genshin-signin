@@ -1,0 +1,27 @@
+name: Genshin Impact Signin
+
+on:
+  schedule:
+    - cron: '0 1 * * *'  # 每天北京时间上午 9:00 (UTC 1:00) 运行
+  workflow_dispatch:      # 允许手动触发，方便测试
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run Sign-in Script
+        env:
+          GS_COOKIE: ${{ secrets.GS_COOKIE }}  # 左边对应Python，右边对应网页Secret
+          SEND_KEY: ${{ secrets.SEND_KEY }}    # 左边对应Python，右边对应网页Secret
+        run: python main.py
