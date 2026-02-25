@@ -11,10 +11,9 @@ import json
 COOKIE = os.environ.get("GS_COOKIE", "").strip()
 PUSH_KEY = os.environ.get("SEND_KEY", "").strip()
 
-# 2. 核心常量（提取自你提供的最新数据）
-# 国服原神签到活动 ID
+# 2. 核心常量
+# 国服原神新版 Luna 签到活动 ID
 ACT_ID = "e202311201442471"  
-# 对应 2.99.1 版本的 Salt (用于 luna 接口签到)
 SALT = "k8v1tj7p176403t835560ndnx32230v7" 
 APP_VERSION = "2.99.1"
 CLIENT_TYPE = "5" # mobile web
@@ -27,13 +26,12 @@ SIGN_URL = "https://api-takumi.mihoyo.com/event/luna/sign"
 def get_ds(query: str = "", body: dict = None) -> str:
     """
     生成国服最新的 DS 2.0 签名
-    算法：md5(salt=SALT&t=t&r=r&b=b&q=q)
     """
     t = int(time.time())
     r = ''.join(random.sample(string.ascii_letters + string.digits, 6))
     
-    # 将请求体转换为紧凑 JSON 字符串
-    b = json.dumps(body) if body else ""
+    # 将请求体转换为紧凑 JSON 字符串（去空格）
+    b = json.dumps(body, separators=(',', ':')) if body else ""
     q = query
     
     main_str = f"salt={SALT}&t={t}&r={r}&b={b}&q={q}"
@@ -45,14 +43,18 @@ def get_headers(body: dict = None):
     """封装统一的请求头"""
     headers = {
         "User-Agent": f"Mozilla/5.0 (Linux; Android 12; Unspecified Device) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/103.0.5060.129 Mobile Safari/537.36 miHoYoBBS/{APP_VERSION}",
-        "Referer": f"https://webstatic.mihoyo.com/bbs/event/signin-ys/index.html?act_id={ACT_ID}",
+        # [修改点 1]：更新正确的 Origin 和 Referer 域名
+        "Origin": "https://act.mihoyo.com",
+        "Referer": f"https://act.mihoyo.com/bbs/event/signin/h5/index.html?act_id={ACT_ID}",
         "Accept": "application/json, text/plain, */*",
         "Content-Type": "application/json;charset=utf-8",
         "Host": "api-takumi.mihoyo.com",
         "x-rpc-app_version": APP_VERSION,
         "x-rpc-client_type": CLIENT_TYPE,
+        # [修改点 2]：最核心的一行！Luna 统一接口必须指定签到的游戏代号，hk4e 代表原神
+        "x-rpc-signgame": "hk4e", 
         "x-rpc-device_id": "".join(random.sample(string.ascii_letters + string.digits, 32)).upper(),
-        "DS": get_ds(body=body), # 必须带上计算后的 DS
+        "DS": get_ds(body=body),
         "Cookie": COOKIE
     }
     return headers
@@ -83,8 +85,16 @@ def main():
 
     # 1. 获取角色列表
     try:
-        # 获取角色列表通常不需要带 DS 或使用简单 DS 1.0，此处简化处理
+        # GET 请求，没有 body
         role_res = requests.get(ROLES_URL, headers=get_headers(), timeout=15).json()
+        
+        # [补充点]：增加对 Cookie 失效的判断 (-100)
+        if role_res.get("retcode") == -100:
+            msg = "❌ 获取角色失败：Cookie已失效或不完整，请重新抓取Cookie"
+            print(msg)
+            push_wechat([msg])
+            return
+            
         if role_res.get("retcode") != 0:
             msg = f"❌ 获取角色失败：{role_res.get('message')}"
             print(msg)
@@ -110,8 +120,9 @@ def main():
         }
         
         try:
-            # 执行签到请求
-            res = requests.post(SIGN_URL, headers=get_headers(body=payload), json=payload, timeout=15).json()
+            # POST 请求，必须把 payload 传给 get_headers 以计算出正确的 DS2.0
+            headers = get_headers(body=payload)
+            res = requests.post(SIGN_URL, headers=headers, json=payload, timeout=15).json()
             retcode = res.get("retcode")
             msg = res.get("message")
             
@@ -120,7 +131,7 @@ def main():
             elif retcode == -5003:
                 result = f"✨ {role_info}: 今天已经签过啦~"
             else:
-                result = f"⚠️ {role_info}: 失败 | {msg}"
+                result = f"⚠️ {role_info}: 失败 | {msg} ({retcode})"
             
             print(result)
             summary.append(result)
