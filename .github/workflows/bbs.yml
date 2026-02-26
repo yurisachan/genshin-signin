@@ -1,4 +1,4 @@
-name: Genshin Impact & BBS Signin
+name: BBS Signin
 
 on:
   schedule:
